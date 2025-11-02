@@ -15,7 +15,7 @@ This project provides a complete pipeline for converting PDF files to EPUB forma
 
 - **Python orchestrator** – Single entry point (`python -m pipeline`) manages OCR, cleaning, AI refinement, and EPUB generation with shared configuration.
 - **Page-aware workflow** – Every stage preserves page boundaries so EPUBs mirror the source pagination and plain-text exports stay easy to audit.
-- **Flexible extraction** – Attempts direct text extraction first, with automatic fallback to high-quality OCR (PyMuPDF + pdf2image + Tesseract).
+- **Flexible extraction** – Tries direct text extraction first, with optional Surya OCR for page images when the PDF lacks a text layer.
 - **Robust preprocessing** – Removes headers/footers, repairs soft-hyphen breaks, normalises whitespace, and protects list/heading structure.
 - **OpenAI refinement** – Deterministic prompts with concurrency, cost tracking, and skip logic for empty pages; works with any GPT-4.1-compatible key.
 - **Cost and progress telemetry** – Live token counts, cost estimates, and guardrails (`--max-cost`, `--confirm-cost`) for long documents.
@@ -37,18 +37,13 @@ Install required packages:
 pip install -r requirements.txt
 
 # Or install individually:
-pip install openai python-dotenv ebooklib tqdm tiktoken PyMuPDF pytesseract pillow pdf2image
+pip install openai python-dotenv ebooklib tqdm tiktoken PyMuPDF pillow surya-ocr
 ```
 
-**System Dependencies:**
-- **Tesseract OCR**: Required for OCR functionality
-  - Windows: Download from [GitHub releases](https://github.com/UB-Mannheim/tesseract/wiki)
-  - macOS: `brew install tesseract`
-  - Ubuntu: `sudo apt install tesseract-ocr`
-- **Poppler** (optional): Improves PDF to image conversion
-  - Windows: Download from [poppler releases](https://github.com/oschwartz10612/poppler-windows/releases)
-  - macOS: `brew install poppler`
-  - Ubuntu: `sudo apt install poppler-utils`
+**System Notes:**
+- Surya ships large neural checkpoints; the first run will download ~2 GB of weights to your cache.
+- GPU acceleration (CUDA or Apple M‑series MPS) dramatically speeds up Surya. CPU-only runs work but can be slow.
+- Ensure you have enough disk space in your cache directory (defaults to `~/Library/Caches/datalab` on macOS).
 
 ### Setup
 
@@ -70,14 +65,16 @@ pip install openai python-dotenv ebooklib tqdm tiktoken PyMuPDF pytesseract pill
 Run the full workflow with the new CLI:
 
 ```bash
-python -m pipeline run "document.pdf" --max-pages 10 --max-cost 5 --confirm-cost
+python -m pipeline run "document.pdf" --ocr-engine surya --max-cost 5 --confirm-cost
 ```
 
 Useful flags:
 
+- `--ocr-engine {text|surya}` – choose between direct text extraction or Surya OCR.
+- `--page-range 5-120` – limit processing to a 1-based inclusive slice.
 - `--skip-ai` – stop after heuristic cleanup (no OpenAI cost).
-- `--max-pages N` – process only the first *N* pages for quick smoke tests.
-- `--tesseract-lang LANG` – OCR language override when direct extraction fails.
+- `--max-pages N` – cap the number of pages processed after other filters (handy for smoke tests).
+- `--force-ocr` – bypass direct extraction and run the chosen OCR engine.
 - `--max-cost` / `--confirm-cost` – cost guardrails for OpenAI refinement.
 
 ### Manual Step-by-Step Process
@@ -105,11 +102,12 @@ python -m pipeline epub --input temp/document_refined.txt --output output/docume
 Extracts text from PDFs, automatically falling back to OCR when needed.
 
 ```bash
-python -m pipeline ocr document.pdf --output document_ocr.txt --max-pages 20
+python -m pipeline ocr document.pdf --ocr-engine surya --output document_ocr.txt --page-range 10-25
 ```
 
-- `--force-ocr` forces raster-based OCR even if a text layer exists.
-- `--max-pages` lets you experiment on a small slice before committing to the whole book.
+- `--ocr-engine {text|surya}` selects the extraction method.
+- `--force-ocr` forces Surya even when a text layer exists.
+- `--page-range` and `--max-pages` combine to keep experiments focused.
 
 #### `python -m pipeline clean`
 
@@ -143,11 +141,7 @@ python -m pipeline epub --input document_refined.txt --output document.epub
 
 ## Testing
 
-The project includes several test scripts:
-
-- `test_api.py` - Test OpenAI API connectivity
-- `test_chunks.py` - Test text chunking logic  
-- `test_subset.py` - Process a small subset for testing
+No automated regression suite ships with the repository today. When changing the pipeline, run a targeted Surya-backed conversion with a small `--page-range` to smoke test the extraction/cleanup flow before processing a full document.
 
 ## Configuration
 
@@ -163,7 +157,6 @@ The orchestrator and the per-stage CLIs read their defaults from `.env`:
 | `TEMP_DIR` | Scratch space for OCR/intermediate text. | `temp/` |
 | `MAX_TOKENS_PER_CHUNK` | Upper bound for AI chunk size. | `3000` |
 | `MAX_COST_LIMIT` | USD ceiling before prompting for confirmation. | `10.0` |
-| `TESSERACT_LANG` | Default OCR language code. | `eng` |
 
 Override any of these at runtime via CLI flags (e.g., `python -m pipeline doc.pdf --max-cost 3`).
 

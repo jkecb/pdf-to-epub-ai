@@ -5,6 +5,7 @@ Shared command implementations for the pipeline CLI.
 """
 
 from pathlib import Path
+from typing import Optional, Tuple
 
 from .config import PipelineConfig
 from .epub import write_pagewise_epub, write_plain_text
@@ -20,14 +21,18 @@ log = get_logger(__name__)
 def run_pipeline(args) -> None:
     """Run the full PDF → EPUB pipeline."""
     configure_logging(_parse_log_level(args.log_level))
+    ocr_engine = _resolve_ocr_engine(getattr(args, "ocr_engine", "text"), args.force_ocr)
+    page_range = _parse_page_range(getattr(args, "page_range", None))
     cfg = PipelineConfig.load(
         input_pdf=args.pdf,
         output_dir=args.output_dir,
         temp_dir=args.temp_dir,
         force_ocr=args.force_ocr,
         tesseract_lang=args.tesseract_lang,
+        ocr_engine=ocr_engine,
         ai_model=args.ai_model,
         max_pages=args.max_pages,
+        page_range=page_range,
         max_cost_limit=args.max_cost,
         confirm_cost=args.confirm_cost,
     )
@@ -56,10 +61,14 @@ def run_pipeline(args) -> None:
 def run_ocr_command(args) -> None:
     """Extract text (direct or OCR) and write a page-marked text file."""
     configure_logging(_parse_log_level(args.log_level))
+    ocr_engine = _resolve_ocr_engine(getattr(args, "ocr_engine", "text"), args.force_ocr)
+    page_range = _parse_page_range(getattr(args, "page_range", None))
     cfg = PipelineConfig.load(
         input_pdf=args.pdf,
         force_ocr=args.force_ocr,
         max_pages=args.max_pages,
+        page_range=page_range,
+        ocr_engine=ocr_engine,
         allow_missing_input=False,
     )
 
@@ -141,6 +150,37 @@ def _parse_log_level(level: str) -> int:
         "DEBUG": 10,
     }
     return mapping.get(level.upper(), 20)
+
+
+def _resolve_ocr_engine(engine: Optional[str], force_ocr: bool) -> str:
+    """Normalize OCR engine selection and honour legacy --force-ocr behaviour."""
+    normalized = (engine or "text").lower()
+    if normalized not in {"text", "surya"}:
+        raise ValueError(f"Unsupported OCR engine: {engine}")
+    if force_ocr and normalized == "text":
+        log.info("Forcing OCR: defaulting engine to Surya.")
+        return "surya"
+    return normalized
+
+
+def _parse_page_range(value: Optional[str]) -> Optional[Tuple[int, int]]:
+    """Parse an inclusive 1-based page range string."""
+    if not value:
+        return None
+    cleaned = value.strip().replace(" ", "")
+    if not cleaned:
+        return None
+    if "-" in cleaned:
+        start_str, end_str = cleaned.split("-", 1)
+        if not start_str or not end_str:
+            raise ValueError(f"Invalid page range: {value}")
+        start = int(start_str)
+        end = int(end_str)
+    else:
+        start = end = int(cleaned)
+    if start < 1 or end < 1 or end < start:
+        raise ValueError(f"Invalid page range: {value}")
+    return (start, end)
 
 
 __all__ = [

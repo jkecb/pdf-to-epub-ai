@@ -9,7 +9,7 @@ resolved in a single place so that individual stages remain stateless.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 import os
 
 from dotenv import load_dotenv
@@ -41,6 +41,8 @@ class PipelineConfig:
     confirm_cost: bool = False
     tesseract_lang: str = "eng"
     force_ocr: bool = False
+    ocr_engine: str = "text"
+    page_range: Optional[Tuple[int, int]] = None
     openai_api_key: Optional[str] = field(default=None, repr=False)
 
     @staticmethod
@@ -51,8 +53,10 @@ class PipelineConfig:
         *,
         force_ocr: bool = False,
         tesseract_lang: Optional[str] = None,
+        ocr_engine: Optional[str] = None,
         ai_model: Optional[str] = None,
         max_pages: Optional[int] = None,
+        page_range: Optional[Tuple[int, int]] = None,
         max_tokens_per_chunk: Optional[int] = None,
         max_cost_limit: Optional[float] = None,
         confirm_cost: bool = False,
@@ -81,6 +85,12 @@ class PipelineConfig:
         final_txt_path = resolved_output / f"{resolved_input.stem}_final.txt"
         final_epub_path = resolved_output / f"{resolved_input.stem}.epub"
 
+        resolved_engine = (ocr_engine or os.getenv("OCR_ENGINE", "text")).lower()
+        if resolved_engine not in {"text", "surya"}:
+            raise ValueError(f"Unsupported OCR engine: {resolved_engine}")
+
+        validated_range = _validate_page_range(page_range)
+
         cfg = PipelineConfig(
             input_pdf=resolved_input,
             temp_dir=resolved_temp,
@@ -93,6 +103,8 @@ class PipelineConfig:
             tesseract_lang=tesseract_lang
             or os.getenv("TESSERACT_LANG", "eng"),
             force_ocr=force_ocr,
+            ocr_engine=resolved_engine,
+            page_range=validated_range,
             ai_model=ai_model or os.getenv("AI_MODEL", "gpt-4.1"),
             max_pages=max_pages,
             max_tokens_per_chunk=int(
@@ -107,6 +119,20 @@ class PipelineConfig:
         cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
         return cfg
+
+
+def _validate_page_range(
+    page_range: Optional[Tuple[int, int]]
+) -> Optional[Tuple[int, int]]:
+    """Validate the provided 1-based inclusive page range."""
+    if page_range is None:
+        return None
+    start, end = page_range
+    if start < 1 or end < 1:
+        raise ValueError("Page range values must be >= 1.")
+    if end < start:
+        raise ValueError("Page range end must be >= start.")
+    return (start, end)
 
 
 __all__ = ["PipelineConfig"]

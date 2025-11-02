@@ -43,10 +43,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force OCR even if the PDF contains extractable text.",
     )
     run_parser.add_argument(
+        "--ocr-engine",
+        type=str,
+        choices=["text", "surya"],
+        default="text",
+        help="Choose direct text extraction or Surya OCR (default: text).",
+    )
+    run_parser.add_argument(
         "--tesseract-lang",
         type=str,
         default=None,
         help="OCR language code (defaults to TESSERACT_LANG or 'eng').",
+    )
+    run_parser.add_argument(
+        "--page-range",
+        type=str,
+        default=None,
+        help="Process an inclusive 1-based page range (e.g., 5-12).",
     )
     run_parser.add_argument(
         "--skip-ai",
@@ -99,10 +112,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force OCR even if direct extraction succeeds.",
     )
     ocr_parser.add_argument(
+        "--ocr-engine",
+        type=str,
+        choices=["text", "surya"],
+        default="text",
+        help="Choose direct text extraction or Surya OCR (default: text).",
+    )
+    ocr_parser.add_argument(
         "--max-pages",
         type=int,
         default=None,
         help="Process only the first N pages.",
+    )
+    ocr_parser.add_argument(
+        "--page-range",
+        type=str,
+        default=None,
+        help="Process an inclusive 1-based page range (e.g., 5-12).",
     )
     ocr_parser.add_argument(
         "--log-level",
