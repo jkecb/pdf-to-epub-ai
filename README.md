@@ -67,130 +67,79 @@ pip install openai python-dotenv ebooklib tqdm tiktoken PyMuPDF pytesseract pill
 
 ### Automated Pipeline
 
-The recommended entry point is the Python orchestrator:
+Run the full workflow with the new CLI:
 
 ```bash
-python -m pipeline "document.pdf" --max-pages 10 --max-cost 5 --confirm-cost
+python -m pipeline run "document.pdf" --max-pages 10 --max-cost 5 --confirm-cost
 ```
 
-Key options:
+Useful flags:
 
-- `--skip-ai` – run only the local OCR + cleaning stages.
-- `--max-pages N` – process only the first *N* pages (useful for smoke tests).
-- `--tesseract-lang lang` – override the OCR language (defaults to `eng`).
-- `--max-cost` / `--confirm-cost` – guardrails for OpenAI usage.
-
-The wrapper scripts now delegate to the orchestrator, so you can still use them if you prefer platform-specific launchers:
-
-```bash
-./run_pipeline.sh document.pdf --skip-ai
-```
-
-```powershell
-PS> .\run_pipeline.ps1 document.pdf --max-pages 5
-```
-
-```batch
-REM Windows CMD
-run_pipeline.bat document.pdf --tesseract-lang eng+ron
-```
+- `--skip-ai` – stop after heuristic cleanup (no OpenAI cost).
+- `--max-pages N` – process only the first *N* pages for quick smoke tests.
+- `--tesseract-lang LANG` – OCR language override when direct extraction fails.
+- `--max-cost` / `--confirm-cost` – cost guardrails for OpenAI refinement.
 
 ### Manual Step-by-Step Process
 
-For manual control or debugging, each stage still has its own CLI wrapper:
+For manual control or debugging, each stage is available as a subcommand:
 
 ```bash
 # Step 1: Extract text from PDF (OCR if needed)
-python pdf_ocr.py --in document.pdf --out temp/document_ocr.txt --max-pages 5
+python -m pipeline ocr document.pdf --output temp/document_ocr.txt --max-pages 5
 
 # Step 2: Clean OCR text with the heuristic pipeline
-python process_ocr.py --in temp/document_ocr.txt --out temp/document_clean.txt
+python -m pipeline clean --input temp/document_ocr.txt --output temp/document_clean.txt
 
 # Step 3: AI refinement (costs money!)
-python openai_cleaner.py --in temp/document_clean.txt --out temp/document_refined.txt --model gpt-4.1 --max-cost 5 --confirm-cost
+python -m pipeline refine --input temp/document_clean.txt --output temp/document_refined.txt --max-cost 5 --confirm-cost
 
 # Step 4: Convert to EPUB while preserving page boundaries
-python convert_to_epub.py --in temp/document_refined.txt --out output/document.epub
+python -m pipeline epub --input temp/document_refined.txt --output output/document.epub
 ```
 
-### Individual Tools
+### Subcommands Overview
 
-#### PDF OCR (`pdf_ocr.py`)
+#### `python -m pipeline ocr`
 
-Extracts text from PDF files using OCR when necessary:
+Extracts text from PDFs, automatically falling back to OCR when needed.
 
 ```bash
-python pdf_ocr.py --in document.pdf --out document.txt --max-pages 20
+python -m pipeline ocr document.pdf --output document_ocr.txt --max-pages 20
 ```
 
-**Options:**
-- `--language`: Tesseract language code (default: `eng`).
-- `--force-ocr`: Force OCR even if direct text extraction works.
-- `--max-pages`: Limit processing to the first *N* pages (speeds up testing).
-- `--list-languages`: Show available Tesseract languages.
-- `--check-deps`: Check if all dependencies are installed.
+- `--force-ocr` forces raster-based OCR even if a text layer exists.
+- `--max-pages` lets you experiment on a small slice before committing to the whole book.
 
-**Features:**
-- **Smart extraction**: Tries direct text extraction first (faster)
-- **OCR fallback**: Uses Tesseract OCR for image-based PDFs
-- **Multiple backends**: Supports PyMuPDF, pdf2image, and Tesseract
-- **High quality**: 300 DPI image conversion for better OCR results
-- **Multi-language**: Supports all Tesseract language packs
+#### `python -m pipeline clean`
 
-**Dependencies:**
-```bash
-pip install PyMuPDF pytesseract pillow pdf2image
-```
-
-*Note: Also requires Tesseract OCR system installation and optionally Poppler for pdf2image.*
-
-#### OCR Cleanup (`process_ocr.py`)
-
-Cleans raw OCR text using regex patterns and heuristics:
+Applies regex/heuristic cleanup to page-marked text.
 
 ```bash
-python process_ocr.py --in input.txt --out output/clean.txt
+python -m pipeline clean --input document_ocr.txt --output document_clean.txt
 ```
 
-**Features:**
-- Removes repeated headers/footers and page counters.
-- Repairs hyphenated and soft-hyphen word breaks.
-- Re-flows paragraphs while respecting lists and headings.
-- Normalizes whitespace and punctuation.
-- Cleans up common OCR glyph substitutions.
+#### `python -m pipeline refine`
 
-#### AI Refinement (`openai_cleaner.py`)
-
-Uses OpenAI's API to correct spelling, punctuation, and OCR errors:
+Runs the OpenAI-based refinement stage.
 
 ```bash
-python openai_cleaner.py --in input.txt --out output.txt --model gpt-4.1 --max-cost 5 --confirm-cost
+python -m pipeline refine --input document_clean.txt --output document_refined.txt --max-cost 5 --confirm-cost
 ```
 
-**Options:**
-- `--model`: Choose OpenAI model (default: value from `.env`, typically `gpt-4.1`).
-- `--max-cost`: Estimated cost ceiling in USD (defaults to `MAX_COST_LIMIT`).
-- `--confirm-cost`: Required when the estimate exceeds the cost ceiling.
-- `--log-level`: Adjust verbosity while debugging.
+- `--ai-model` overrides the model declared in `.env`.
+- `--max-cost` / `--confirm-cost` keep spending in check.
+- `--pdf` optionally links back to the original PDF for metadata.
 
-The refiner processes pages concurrently, tracks token usage and cost, and falls back gracefully if the OpenAI credentials are missing or invalid.
+#### `python -m pipeline epub`
 
-**Cost Estimation:**
-- GPT-4.1: ~$0.002 per 1K input tokens, ~$0.008 per 1K output tokens
-- Typical 200-page book: $2-8 depending on content
-
-#### EPUB Conversion (`convert_to_epub.py`)
-
-Converts cleaned text to EPUB format:
+Generates an EPUB with page-by-page spine entries.
 
 ```bash
-python convert_to_epub.py --in input.txt --out output.epub
+python -m pipeline epub --input document_refined.txt --output document.epub
 ```
 
-**Features:**
-- Preserves original page boundaries (each page becomes a spine item).
-- Generates a clean EPUB with TOC and default styling.
-- Works equally well on heuristic-only or AI-refined text.
+- `--pdf` (optional) improves metadata when the original PDF is still available.
 
 ## Testing
 
@@ -259,7 +208,6 @@ pdf-to-epub-ai/
 ├── process_ocr.py            # Standalone cleanup CLI wrapper
 ├── openai_cleaner.py         # Standalone AI refinement CLI wrapper
 ├── convert_to_epub.py        # Standalone EPUB conversion CLI wrapper
-├── run_pipeline.{sh,ps1,bat} # Thin wrappers around the orchestrator
 ├── test_*.py / *.bat         # Utility scripts for smoke tests
 ├── requirements.txt          # Python dependencies
 ├── README.md                 # This documentation
