@@ -62,47 +62,51 @@ pip install openai python-dotenv ebooklib tqdm tiktoken PyMuPDF pytesseract pill
 
 ## Usage
 
-### Automated Pipeline Scripts
+### Automated Pipeline
 
-**Windows Users:** Use the provided batch files for automated processing:
-
-```batch
-# Full pipeline with AI refinement
-run_pipeline.bat document.pdf
-
-# Test pipeline without AI (faster, free)
-test_pdf_pipeline.bat document.pdf
-```
-
-**PowerShell Users:**
-
-```powershell
-# Full pipeline with AI refinement
-.\run_pipeline.ps1 document.pdf
-```
-
-**Linux/macOS Users:**
+The recommended entry point is the Python orchestrator:
 
 ```bash
-# Full pipeline with AI refinement
-./run_pipeline.sh document.pdf
+python -m pipeline "document.pdf" --max-pages 10 --max-cost 5 --confirm-cost
+```
+
+Key options:
+
+- `--skip-ai` – run only the local OCR + cleaning stages.
+- `--max-pages N` – process only the first *N* pages (useful for smoke tests).
+- `--tesseract-lang lang` – override the OCR language (defaults to `eng`).
+- `--max-cost` / `--confirm-cost` – guardrails for OpenAI usage.
+
+The wrapper scripts now delegate to the orchestrator, so you can still use them if you prefer platform-specific launchers:
+
+```bash
+./run_pipeline.sh document.pdf --skip-ai
+```
+
+```powershell
+PS> .\run_pipeline.ps1 document.pdf --max-pages 5
+```
+
+```batch
+REM Windows CMD
+run_pipeline.bat document.pdf --tesseract-lang eng+ron
 ```
 
 ### Manual Step-by-Step Process
 
-For manual control or debugging, process each step individually:
+For manual control or debugging, each stage still has its own CLI wrapper:
 
 ```bash
 # Step 1: Extract text from PDF (OCR if needed)
-python pdf_ocr.py --in document.pdf --out temp/document_ocr.txt
+python pdf_ocr.py --in document.pdf --out temp/document_ocr.txt --max-pages 5
 
-# Step 2: Clean OCR text
+# Step 2: Clean OCR text with the heuristic pipeline
 python process_ocr.py --in temp/document_ocr.txt --out temp/document_clean.txt
 
 # Step 3: AI refinement (costs money!)
-python openai_cleaner.py --in temp/document_clean.txt --out temp/document_refined.txt --model gpt-4.1
+python openai_cleaner.py --in temp/document_clean.txt --out temp/document_refined.txt --model gpt-4o --max-cost 5 --confirm-cost
 
-# Step 4: Convert to EPUB
+# Step 4: Convert to EPUB while preserving page boundaries
 python convert_to_epub.py --in temp/document_refined.txt --out output/document.epub
 ```
 
@@ -113,14 +117,15 @@ python convert_to_epub.py --in temp/document_refined.txt --out output/document.e
 Extracts text from PDF files using OCR when necessary:
 
 ```bash
-python pdf_ocr.py --in document.pdf --out document.txt
+python pdf_ocr.py --in document.pdf --out document.txt --max-pages 20
 ```
 
 **Options:**
-- `--language`: Tesseract language code (default: `eng`)
-- `--force-ocr`: Force OCR even if direct text extraction works
-- `--list-languages`: Show available Tesseract languages
-- `--check-deps`: Check if all dependencies are installed
+- `--language`: Tesseract language code (default: `eng`).
+- `--force-ocr`: Force OCR even if direct text extraction works.
+- `--max-pages`: Limit processing to the first *N* pages (speeds up testing).
+- `--list-languages`: Show available Tesseract languages.
+- `--check-deps`: Check if all dependencies are installed.
 
 **Features:**
 - **Smart extraction**: Tries direct text extraction first (faster)
@@ -145,25 +150,27 @@ python process_ocr.py --in input.txt --out output/clean.txt
 ```
 
 **Features:**
-- Removes page numbers and form feeds
-- Merges hyphen-broken words
-- Re-flows paragraphs
-- Normalizes whitespace and punctuation
-- Fixes common OCR misreadings (0→o, rn→m, etc.)
+- Removes repeated headers/footers and page counters.
+- Repairs hyphenated and soft-hyphen word breaks.
+- Re-flows paragraphs while respecting lists and headings.
+- Normalizes whitespace and punctuation.
+- Cleans up common OCR glyph substitutions.
 
 #### AI Refinement (`openai_cleaner.py`)
 
 Uses OpenAI's API to correct spelling, punctuation, and OCR errors:
 
 ```bash
-python openai_cleaner.py --in input.txt --out output.txt --model gpt-4.1
+python openai_cleaner.py --in input.txt --out output.txt --model gpt-4o --max-cost 5 --confirm-cost
 ```
 
 **Options:**
-- `--model`: Choose OpenAI model (default: `gpt-4.1`)
-- Supports concurrent processing for speed
-- Tracks costs and provides detailed progress reports
-- Automatic retry logic for failed API calls
+- `--model`: Choose OpenAI model (default: value from `.env`, typically `gpt-4.1`).
+- `--max-cost`: Estimated cost ceiling in USD (defaults to `MAX_COST_LIMIT`).
+- `--confirm-cost`: Required when the estimate exceeds the cost ceiling.
+- `--log-level`: Adjust verbosity while debugging.
+
+The refiner processes pages concurrently, tracks token usage and cost, and falls back gracefully if the OpenAI credentials are missing or invalid.
 
 **Cost Estimation:**
 - GPT-4.1: ~$0.002 per 1K input tokens, ~$0.008 per 1K output tokens
@@ -178,10 +185,9 @@ python convert_to_epub.py --in input.txt --out output.epub
 ```
 
 **Features:**
-- Automatic chapter detection (Chapter/Part headings)
-- Proper EPUB structure with table of contents
-- CSS styling for improved readability
-- Metadata support (title, author, etc.)
+- Preserves original page boundaries (each page becomes a spine item).
+- Generates a clean EPUB with TOC and default styling.
+- Works equally well on heuristic-only or AI-refined text.
 
 ## Testing
 

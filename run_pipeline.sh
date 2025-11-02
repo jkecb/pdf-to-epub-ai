@@ -1,36 +1,14 @@
 #!/bin/bash
-# This script runs the full PDF to EPUB pipeline
+# This script runs the new Python orchestrator for the PDF to EPUB pipeline.
 
-# Load environment variables from .env file if present
-if [ -f .env ]; then
-    export $(cat .env | xargs)
+set -euo pipefail
+
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <input.pdf> [--skip-ai] [additional args]"
+    exit 1
 fi
 
-# Ensure required directories exist
-mkdir -p "$OUTPUT_DIR"
-mkdir -p "$TEMP_DIR"
+INPUT_PDF="$1"
+shift || true
 
-# Step 1: Perform OCR on PDF
-echo "Starting OCR process..."
-python pdf_ocr.py input.pdf "$TEMP_DIR/ocr_output.txt"
-
-# Step 2: Clean the OCR text
-echo "Cleaning OCR text..."
-python process_ocr.py "$TEMP_DIR/ocr_output.txt" "$TEMP_DIR/cleaned_text.txt"
-
-# Step 3: AI-Based Text Refinement
-echo "Refining text with AI..."
-python openai_cleaner.py "$TEMP_DIR/cleaned_text.txt" "$TEMP_DIR/refined_text.txt"
-
-# Step 4: Copy refined text to output directory
-echo "Copying refined text to output..."
-cp "$TEMP_DIR/refined_text.txt" "$OUTPUT_DIR/final_output.txt"
-
-# Step 5: Convert cleaned text to EPUB
-echo "Converting to EPUB..."
-python convert_to_epub.py "$TEMP_DIR/refined_text.txt" "$OUTPUT_DIR/final_output.epub"
-
-# Completion message
-echo "PDF to EPUB conversion complete!"
-echo "Output TXT: $OUTPUT_DIR/final_output.txt"
-echo "Output EPUB: $OUTPUT_DIR/final_output.epub"
+python -m pipeline "$INPUT_PDF" "$@"
