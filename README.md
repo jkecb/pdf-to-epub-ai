@@ -13,15 +13,13 @@ This project provides a complete pipeline for converting PDF files to EPUB forma
 
 ## Features
 
-- **Smart PDF text extraction** - Direct extraction or OCR fallback
-- **Post-OCR correction** - Local regex cleanup + AI-powered refinement
-- **AI text refinement** - OpenAI GPT-4.1 for spelling, grammar, and OCR error correction
-- **Concurrent processing** - Parallel API calls for faster processing
-- **Real-time cost tracking** - Detailed progress and cost estimation
-- **Automatic chapter detection** - Smart EPUB structuring from headings
-- **Intelligent text chunking** - Paragraph-aware splitting for optimal API usage
-- **Multi-language OCR support** - All Tesseract language packs
-- **Comprehensive error handling** - Retry logic and graceful failure recovery
+- **Python orchestrator** – Single entry point (`python -m pipeline`) manages OCR, cleaning, AI refinement, and EPUB generation with shared configuration.
+- **Page-aware workflow** – Every stage preserves page boundaries so EPUBs mirror the source pagination and plain-text exports stay easy to audit.
+- **Flexible extraction** – Attempts direct text extraction first, with automatic fallback to high-quality OCR (PyMuPDF + pdf2image + Tesseract).
+- **Robust preprocessing** – Removes headers/footers, repairs soft-hyphen breaks, normalises whitespace, and protects list/heading structure.
+- **OpenAI refinement** – Deterministic prompts with concurrency, cost tracking, and skip logic for empty pages; works with any GPT-4.1-compatible key.
+- **Cost and progress telemetry** – Live token counts, cost estimates, and guardrails (`--max-cost`, `--confirm-cost`) for long documents.
+- **Modular CLI utilities** – Each stage remains available as a standalone script for debugging or bespoke workflows.
 
 ## Installation
 
@@ -55,10 +53,15 @@ pip install openai python-dotenv ebooklib tqdm tiktoken PyMuPDF pytesseract pill
 ### Setup
 
 1. Clone this repository
-2. Create a `.env` file in the project root:
+2. Create a `.env` file in the project root (the orchestrator loads these values automatically):
+   ```env
+   OPENAI_API_KEY=sk-your-key
+   AI_MODEL=gpt-4.1
+   OUTPUT_DIR=output
+   TEMP_DIR=temp
+   MAX_COST_LIMIT=5
    ```
-   OPENAI_API_KEY=your_openai_api_key_here
-   ```
+   Adjust any paths or limits to suit your environment. CLI flags always take precedence over `.env` values.
 
 ## Usage
 
@@ -104,7 +107,7 @@ python pdf_ocr.py --in document.pdf --out temp/document_ocr.txt --max-pages 5
 python process_ocr.py --in temp/document_ocr.txt --out temp/document_clean.txt
 
 # Step 3: AI refinement (costs money!)
-python openai_cleaner.py --in temp/document_clean.txt --out temp/document_refined.txt --model gpt-4o --max-cost 5 --confirm-cost
+python openai_cleaner.py --in temp/document_clean.txt --out temp/document_refined.txt --model gpt-4.1 --max-cost 5 --confirm-cost
 
 # Step 4: Convert to EPUB while preserving page boundaries
 python convert_to_epub.py --in temp/document_refined.txt --out output/document.epub
@@ -161,7 +164,7 @@ python process_ocr.py --in input.txt --out output/clean.txt
 Uses OpenAI's API to correct spelling, punctuation, and OCR errors:
 
 ```bash
-python openai_cleaner.py --in input.txt --out output.txt --model gpt-4o --max-cost 5 --confirm-cost
+python openai_cleaner.py --in input.txt --out output.txt --model gpt-4.1 --max-cost 5 --confirm-cost
 ```
 
 **Options:**
@@ -199,6 +202,22 @@ The project includes several test scripts:
 
 ## Configuration
 
+### Environment Variables
+
+The orchestrator and the per-stage CLIs read their defaults from `.env`:
+
+| Key | Description | Default |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | API key used by `openai` library. | *required* |
+| `AI_MODEL` | Chat-completions model for refinement. | `gpt-4.1` |
+| `OUTPUT_DIR` | Directory for final EPUB/TXT artefacts. | `output/` |
+| `TEMP_DIR` | Scratch space for OCR/intermediate text. | `temp/` |
+| `MAX_TOKENS_PER_CHUNK` | Upper bound for AI chunk size. | `3000` |
+| `MAX_COST_LIMIT` | USD ceiling before prompting for confirmation. | `10.0` |
+| `TESSERACT_LANG` | Default OCR language code. | `eng` |
+
+Override any of these at runtime via CLI flags (e.g., `python -m pipeline doc.pdf --max-cost 3`).
+
 ### Chunking Parameters
 
 The AI refinement tool splits text into chunks for processing:
@@ -225,23 +244,26 @@ The AI refinement tool processes chunks concurrently:
 
 ```
 pdf-to-epub-ai/
-├── pdf_ocr.py             # PDF text extraction with OCR
-├── process_ocr.py          # OCR cleanup with regex/heuristics
-├── openai_cleaner.py       # AI-powered text refinement
-├── convert_to_epub.py      # EPUB generation
-├── run_pipeline.bat        # Windows batch script for full pipeline
-├── run_pipeline.ps1        # PowerShell script for full pipeline
-├── run_pipeline.sh         # Linux/macOS bash script for full pipeline
-├── test_pdf_pipeline.bat   # Windows test pipeline (no AI)
-├── sample_ocr_text.txt     # Sample OCR text for testing
-├── .env.example           # Environment variables template
-├── requirements.txt       # Python dependencies
-├── output/                # Output directory for processed files
-├── temp/                  # Temporary files directory
-├── .env                   # Environment variables (API keys)
-├── .gitignore            # Git ignore patterns
-├── LICENSE               # MIT License
-└── README.md             # This documentation
+├── pipeline/                 # Shared infrastructure used by every entry point
+│   ├── __init__.py
+│   ├── __main__.py           # Enables `python -m pipeline`
+│   ├── config.py             # Env/CLI configuration resolver
+│   ├── logging.py            # Central logging config
+│   ├── main.py               # Orchestrator CLI
+│   ├── ocr.py                # Direct + OCR extraction helpers
+│   ├── pages.py              # Page dataclasses
+│   ├── preprocess.py         # Heuristic text cleanup
+│   ├── refine.py             # OpenAI integration and cost tracking
+│   └── storage.py            # Page-oriented I/O helpers
+├── pdf_ocr.py                # Standalone OCR CLI wrapper
+├── process_ocr.py            # Standalone cleanup CLI wrapper
+├── openai_cleaner.py         # Standalone AI refinement CLI wrapper
+├── convert_to_epub.py        # Standalone EPUB conversion CLI wrapper
+├── run_pipeline.{sh,ps1,bat} # Thin wrappers around the orchestrator
+├── test_*.py / *.bat         # Utility scripts for smoke tests
+├── requirements.txt          # Python dependencies
+├── README.md                 # This documentation
+└── LICENSE
 ```
 
 ## Error Handling
@@ -258,6 +280,8 @@ The AI refinement tool provides detailed cost tracking:
 - Estimated total cost based on progress
 - Token usage statistics (input/output)
 - Cost per chunk analysis
+
+**Rule of thumb:** with `gpt-4.1`, expect roughly $0.005–$0.006 per source page (about 600 input / 540 output tokens). Use `--max-cost` and `--confirm-cost` to prevent surprises on very long documents.
 
 ## Tips for Best Results
 
